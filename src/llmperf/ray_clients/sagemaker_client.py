@@ -35,10 +35,10 @@ class SageMakerClient(LLMClient):
         prompt = request_config.prompt
         prompt, prompt_len = prompt
 
-        message = [
-            {"role": "system", "content": ""},
-            {"role": "user", "content": prompt},
-        ]
+        message = {
+            "inputs": prompt,
+            "steam":True
+        }
         model = request_config.model
         sm_runtime = boto3.client(
             "sagemaker-runtime", region_name=os.environ.get("AWS_REGION_NAME")
@@ -51,15 +51,11 @@ class SageMakerClient(LLMClient):
             del sampling_params["max_tokens"]
 
         message = {
-            "inputs": [
-                [
-                    {"role": "system", "content": ""},
-                    {"role": "user", "content": prompt},
-                ]
-            ],
+            "inputs": prompt,
             "parameters": {
                 **request_config.sampling_params,
-            },
+                "steam":True
+            }
         }
 
         time_to_next_token = []
@@ -76,13 +72,14 @@ class SageMakerClient(LLMClient):
         most_recent_received_token_time = time.monotonic()
 
         try:
+
             response = sm_runtime.invoke_endpoint_with_response_stream(
                 EndpointName=model,
                 ContentType="application/json",
                 Body=json.dumps(message),
                 CustomAttributes="accept_eula=true",
             )
-
+            
             event_stream = response["Body"]
             json_byte = b""
             for line, ttft, _ in LineIterator(event_stream):
@@ -91,12 +88,27 @@ class SageMakerClient(LLMClient):
                     time.monotonic() - most_recent_received_token_time
                 )
                 most_recent_received_token_time = time.monotonic()
+            
             ttft = ttft - start_time
-            resp = json.loads(json_byte)
+
+            # First decode the bytes to string
+            json_str = json_byte.decode('utf-8')
+                        
+            # Add square brackets and fix the JSON format
+            fixed_json_str = '[' + json_str.replace('}{', '},{') + ']'
+            
+            # Now json_objects contains a list of all parsed JSON objects
+            resp = json.loads(fixed_json_str)
+
             total_request_time = time.monotonic() - start_time
-            generated_text = resp[0]["generation"]["content"]
+
+            # Extract generatd text from resp
+            generated_text = resp[-1]["generated_text"]
+
             tokens_received = len(self.tokenizer.encode(generated_text))
             output_throughput = tokens_received / total_request_time
+            # print(output_throughput)
+            
 
         except Exception as e:
             print(f"Warning Or Error: {e}")

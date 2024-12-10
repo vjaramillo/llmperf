@@ -112,13 +112,16 @@ def get_token_throughput_latencies(
 
             outs = req_launcher.get_next_ready()
             all_metrics = []
+            print(25 * "*")
+            print("metrics reporting")
             for out in outs:
                 request_metrics, gen_text, _ = out
                 num_output_tokens = get_token_length(gen_text)
+                
                 with completed_requests_lock:
                     if num_completed_requests < max_num_completed_requests:
                         if num_output_tokens:
-                            request_metrics[common_metrics.INTER_TOKEN_LAT] /= request_metrics[common_metrics.NUM_OUTPUT_TOKENS]
+                            request_metrics[common_metrics.INTER_TOKEN_LAT] = request_metrics[common_metrics.NUM_OUTPUT_TOKENS]
                         else:
                             request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
                         request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
