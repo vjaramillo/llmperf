@@ -115,7 +115,7 @@ def randomly_sample_sonnet_lines_prompt(
                 break
             prompt += line_to_add
             remaining_prompt_tokens -= get_token_length(line_to_add)
-    return (prompt, num_prompt_tokens)
+    return (prompts, num_prompt_tokens)
 
 
 def sample_random_positive_int(mean: int, stddev: int) -> int:
@@ -143,3 +143,44 @@ def flatten_dict(d, parent_key="", sep="_"):
         else:
             items.append((new_key, v))
     return dict(items)
+
+
+def randomly_sample_prompts(
+    prompt_dict: str,
+    max_seq_len: int = 2048,
+    tokenizer = LlamaTokenizerFast.from_pretrained("hf-internal-testing/llama-tokenizer")):
+    """Sample random questions with context and system length from the prompt dictionary passed to the function, and
+    considering that the prompt doesn't exceed the max_seq_len
+
+    Args:
+        prompt_dict: dictionary with the prompts dataset
+        max_seq_len: maximum token length of the input prompt
+        tokenizer: tokenizer used to calculate the token input prompt
+
+    Returns:
+        A tuple of prompt and the number of tokens of said prompt
+    """
+
+    get_token_length = lambda text: len(tokenizer.encode(text))
+
+    # load prompt dictionary in json format
+    with open(prompt_dict, "r") as file:
+        prompts = json.load(file)
+
+    prompt_dict_size = len(prompts)
+    # index = random.randint(0, prompt_dict_size-1)
+    # num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
+
+    # while num_prompt_tokens < max_seq_len:
+    #     index = random.randint(0, prompt_dict_size)
+    #     num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
+    index = random.randint(0, prompt_dict_size)
+    num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
+    prompt = prompts[index]
+    
+    while num_prompt_tokens > max_seq_len:
+        index = random.randint(0, prompt_dict_size-1)
+        num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
+        prompt = prompts[index]
+    
+    return (prompt, num_prompt_tokens)

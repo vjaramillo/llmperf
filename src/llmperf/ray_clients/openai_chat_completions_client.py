@@ -20,8 +20,8 @@ class OpenAIChatCompletionsClient(LLMClient):
         prompt, prompt_len = prompt
 
         message = [
-            {"role": "system", "content": ""},
-            {"role": "user", "content": prompt},
+            {"role": "system", "content": prompt["system_message"]},
+            {"role": "user", "content": f"Context: {prompt['context']}\nNew Question: {prompt['question']}"},
         ]
         model = request_config.model
         body = {

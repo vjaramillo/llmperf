@@ -1,4 +1,6 @@
-import threading
+import sys
+print(sys.executable)
+
 import argparse
 from collections.abc import Iterable
 import json
@@ -21,10 +23,13 @@ from llmperf.utils import (
     randomly_sample_sonnet_lines_prompt,
     LLMPerfResults,
     sample_random_positive_int,
+    randomly_sample_prompts
 )
 from tqdm import tqdm
 
 from transformers import LlamaTokenizerFast
+
+
 
 def get_token_throughput_latencies(
     model: str,
@@ -32,11 +37,13 @@ def get_token_throughput_latencies(
     stddev_input_tokens: int,
     mean_output_tokens: int,
     stddev_output_tokens: int,
+    max_seq_len: int,
+    custom_prompts_location: str,
     additional_sampling_params: Optional[Dict[str, Any]] = None,
     num_concurrent_requests: int = 1,
     max_num_completed_requests: int = 500,
     test_timeout_s=90,
-    llm_api="openai",
+    llm_api="openai"
 ) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
     """Get the token throughput and latencies for the given model.
 
@@ -46,6 +53,8 @@ def get_token_throughput_latencies(
         stddev_input_tokens: The standard deviation of the number of tokens to send in the prompt for the request.
         mean_output_tokens: The mean number of tokens to generate per request.
         stddev_output_tokens: The standard deviation of the number of tokens to generate per request.
+        max_seq_len: maximum amount of tokens of the input passed to the model.
+        custom_prompts_location: Location of the json file that contains the prompts dataset.
         additional_sampling_params: Additional sampling parameters to send with the request.
             For more information see the LLM APIs documentation for the completions
         num_concurrent_requests: The number of concurrent requests to make. Increase
@@ -68,7 +77,8 @@ def get_token_throughput_latencies(
     if not additional_sampling_params:
         additional_sampling_params = {}
 
-    completed_requests_lock = threading.Lock()
+    clients = construct_clients(llm_api=llm_api, num_clients=num_concurrent_requests)
+    req_launcher = RequestsLauncher(clients)
     completed_requests = []
     num_completed_requests = 0
     # make up prompts outside of send loop for faster benchmarking loop
@@ -80,67 +90,51 @@ def get_token_throughput_latencies(
         ))
         num_output_tokens_list.append(num_output_tokens)
 
-        prompts.append(randomly_sample_sonnet_lines_prompt(
-            prompt_tokens_mean=mean_input_tokens,
-            prompt_tokens_stddev=stddev_input_tokens,
-            expect_output_tokens=num_output_tokens,
+        prompts.append(randomly_sample_prompts(
+            prompt_dict=custom_prompts_location,
+            max_seq_len=max_seq_len,
             tokenizer=tokenizer
         ))
+
     start_time = time.monotonic()
+    iter = 0
     pbar = tqdm(total=max_num_completed_requests)
+    while (
+        time.monotonic() - start_time < test_timeout_s
+        and len(completed_requests) < max_num_completed_requests
+    ):
+        iter += 1
 
-    def launch_request(thread_index):
-        nonlocal num_completed_requests
-        clients = construct_clients(llm_api=llm_api, num_clients=1)
-        req_launcher = RequestsLauncher(clients)
-        request_index = thread_index % max_num_completed_requests
-
-        while (
-            time.monotonic() - start_time < test_timeout_s
-            and num_completed_requests < max_num_completed_requests
-        ):
-
-            default_sampling_params = {"max_tokens": num_output_tokens_list[request_index] }
-            default_sampling_params.update(additional_sampling_params)
-            request_config = RequestConfig(
-                model=model,
-                prompt=prompts[request_index],
-                sampling_params=default_sampling_params,
-                llm_api=llm_api,
-            )
-            req_launcher.launch_requests(request_config)
-
+        default_sampling_params = {"max_tokens": num_output_tokens_list.pop()}
+        default_sampling_params.update(additional_sampling_params)
+        
+        request_config = RequestConfig(
+            model=model,
+            prompt=prompts.pop(),
+            sampling_params=default_sampling_params,
+            llm_api=llm_api,
+        )
+        req_launcher.launch_requests(request_config)
+        # Retrieving results less frequently allows for more concurrent requests
+        # to be launched. This will overall reduce the amount of time it takes
+        # for the test to run.
+        if not (iter % num_concurrent_requests):
             outs = req_launcher.get_next_ready()
             all_metrics = []
-            print(25 * "*")
-            print("metrics reporting")
             for out in outs:
                 request_metrics, gen_text, _ = out
                 num_output_tokens = get_token_length(gen_text)
-                
-                with completed_requests_lock:
-                    if num_completed_requests < max_num_completed_requests:
-                        if num_output_tokens:
-                            request_metrics[common_metrics.INTER_TOKEN_LAT] = request_metrics[common_metrics.NUM_OUTPUT_TOKENS]
-                        else:
-                            request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
-                        request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
-                        request_metrics[common_metrics.NUM_TOTAL_TOKENS] = request_metrics[common_metrics.NUM_INPUT_TOKENS] + num_output_tokens
-                        request_metrics[common_metrics.REQ_OUTPUT_THROUGHPUT] = num_output_tokens / request_metrics[common_metrics.E2E_LAT]
-                        all_metrics.append(request_metrics)
-                        completed_requests.extend(all_metrics)
-                        pbar.update(len(all_metrics))
-                        num_completed_requests += len(all_metrics)
-                        request_index = (request_index + num_concurrent_requests) % max_num_completed_requests
-
-    threads = []
-    for i in range(num_concurrent_requests):
-        thread = threading.Thread(target=launch_request, args=(i,))
-        threads.append(thread)
-        thread.start()
-
-    for thread in threads:
-        thread.join()
+                if num_output_tokens: 
+                    request_metrics[common_metrics.INTER_TOKEN_LAT] /= num_output_tokens
+                else:
+                    request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
+                request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
+                request_metrics[common_metrics.NUM_TOTAL_TOKENS] = request_metrics[common_metrics.NUM_INPUT_TOKENS] + num_output_tokens
+                request_metrics[common_metrics.REQ_OUTPUT_THROUGHPUT] = num_output_tokens / request_metrics[common_metrics.E2E_LAT]
+                all_metrics.append(request_metrics)
+            completed_requests.extend(all_metrics)
+        pbar.update(len(completed_requests) - num_completed_requests)
+        num_completed_requests = len(completed_requests)
 
     pbar.close()
     end_time = time.monotonic()
@@ -148,23 +142,21 @@ def get_token_throughput_latencies(
         print("Test timed out before all requests could be completed.")
 
     # check one last time that there are no remaining results to collect.
-    clients = construct_clients(llm_api=llm_api, num_clients=1)
-    req_launcher = RequestsLauncher(clients)
     outs = req_launcher.get_next_ready()
     all_metrics = []
     for out in outs:
         request_metrics, gen_text, _ = out
         num_output_tokens = get_token_length(gen_text)
-        with completed_requests_lock:
-            if num_completed_requests < max_num_completed_requests:
-                if num_output_tokens:
-                    request_metrics[common_metrics.INTER_TOKEN_LAT] /= num_output_tokens
-                else:
-                    request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
-                request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
-                request_metrics[common_metrics.NUM_TOTAL_TOKENS] = request_metrics[common_metrics.NUM_INPUT_TOKENS] + num_output_tokens
-                request_metrics[common_metrics.REQ_OUTPUT_THROUGHPUT] = num_output_tokens / request_metrics[common_metrics.E2E_LAT]
-                completed_requests.extend(request_metrics)
+        if num_output_tokens: 
+            request_metrics[common_metrics.INTER_TOKEN_LAT] /= num_output_tokens
+        else:
+            request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
+        request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
+        request_metrics[common_metrics.NUM_TOTAL_TOKENS] = request_metrics[common_metrics.NUM_INPUT_TOKENS] + num_output_tokens
+        request_metrics[common_metrics.REQ_OUTPUT_THROUGHPUT] = num_output_tokens / request_metrics[common_metrics.E2E_LAT]
+                
+        all_metrics.append(request_metrics)
+    completed_requests.extend(all_metrics)
 
     print(f"\Results for token benchmark for {model} queried with the {llm_api} api.\n")
     ret = metrics_summary(completed_requests, start_time, end_time)
@@ -295,6 +287,8 @@ def run_token_benchmark(
     additional_sampling_params: str,
     results_dir: str,
     user_metadata: Dict[str, Any],
+    max_seq_len: int,
+    custom_prompts_location: str
 ):
     """
     Args:
@@ -312,6 +306,8 @@ def run_token_benchmark(
             For more information see the LLM APIs documentation for the completions.
         results_dir: The directory to save the results to.
         user_metadata: Additional metadata to include in the results.
+        max_seq_len: Maximum input tokens length that the model can process.
+        custom_prompts_locaiton: json file location with the prompts dataset.
     """
     if mean_input_tokens < 40:
         print(
@@ -328,6 +324,8 @@ def run_token_benchmark(
         stddev_input_tokens=stddev_input_tokens,
         mean_output_tokens=mean_output_tokens,
         stddev_output_tokens=stddev_output_tokens,
+        max_seq_len=max_seq_len,
+        custom_prompts_location=custom_prompts_location,
         num_concurrent_requests=num_concurrent_requests,
         additional_sampling_params=json.loads(additional_sampling_params),
     )
@@ -466,6 +464,26 @@ args.add_argument(
     ),
 )
 
+args.add_argument(
+    "--max-seq-len",
+    type=int,
+    default="",
+    help=(
+        "maximum input sequence length supported by the model"
+        "i.e. 128, 2048, 8192"
+    ),
+)
+
+args.add_argument(
+    "--custom-prompts-location",
+    type=str,
+    default="",
+    help=(
+        "Location of the file with custom prompts"
+        "i.e. prompts/my_prompts.json"
+    ),
+)
+
 if __name__ == "__main__":
     env_vars = dict(os.environ)
     ray.init(runtime_env={"env_vars": env_vars})
@@ -491,4 +509,6 @@ if __name__ == "__main__":
         additional_sampling_params=args.additional_sampling_params,
         results_dir=args.results_dir,
         user_metadata=user_metadata,
+        max_seq_len=args.max_seq_len,
+        custom_prompts_location=args.custom_prompts_location
     )
