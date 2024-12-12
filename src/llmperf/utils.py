@@ -115,7 +115,7 @@ def randomly_sample_sonnet_lines_prompt(
                 break
             prompt += line_to_add
             remaining_prompt_tokens -= get_token_length(line_to_add)
-    return (prompts, num_prompt_tokens)
+    return (prompt, num_prompt_tokens)
 
 
 def sample_random_positive_int(mean: int, stddev: int) -> int:
@@ -168,12 +168,6 @@ def randomly_sample_prompts(
         prompts = json.load(file)
 
     prompt_dict_size = len(prompts)
-    # index = random.randint(0, prompt_dict_size-1)
-    # num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
-
-    # while num_prompt_tokens < max_seq_len:
-    #     index = random.randint(0, prompt_dict_size)
-    #     num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
     index = random.randint(0, prompt_dict_size)
     num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
     prompt = prompts[index]

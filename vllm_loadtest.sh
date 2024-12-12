@@ -6,7 +6,7 @@ export OPENAI_API_BASE="http://localhost:8000/v1"
 export TOKENIZERS_PARALLELISM=true
 max_requests=$(expr ${vu} \* 8 )
 date_str=$(date '+%Y-%m-%d-%H-%M-%S')
-/home/ubuntu/llmperf-env/bin/python ./token_benchmark_ray.py \
+/home/ubuntu/aws_llmperf/bin/python ./token_benchmark_ray.py \
        --model ${model} \
        --mean-input-tokens 100 \
        --stddev-input-tokens 10 \
