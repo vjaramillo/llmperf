@@ -18,7 +18,6 @@ from llmperf.common import SUPPORTED_APIS, construct_clients
 from llmperf.models import RequestConfig
 from llmperf.requests_launcher import RequestsLauncher
 from llmperf.utils import (
-    randomly_sample_sonnet_lines_prompt,
     LLMPerfResults,
     sample_random_positive_int,
     randomly_sample_prompts
@@ -26,6 +25,7 @@ from llmperf.utils import (
 from tqdm import tqdm
 
 from transformers import LlamaTokenizerFast
+
 
 def get_token_throughput_latencies(
     model: str,
@@ -120,7 +120,8 @@ def get_token_throughput_latencies(
                 with completed_requests_lock:
                     if num_completed_requests < max_num_completed_requests:
                         if num_output_tokens:
-                            request_metrics[common_metrics.INTER_TOKEN_LAT] /= request_metrics[common_metrics.NUM_OUTPUT_TOKENS]
+                            # request_metrics[common_metrics.INTER_TOKEN_LAT] = request_metrics[common_metrics.NUM_OUTPUT_TOKENS]
+                            pass
                         else:
                             request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
                         request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
@@ -131,7 +132,7 @@ def get_token_throughput_latencies(
                         pbar.update(len(all_metrics))
                         num_completed_requests += len(all_metrics)
                         request_index = (request_index + num_concurrent_requests) % max_num_completed_requests
-
+                        
     threads = []
     for i in range(num_concurrent_requests):
         thread = threading.Thread(target=launch_request, args=(i,))
@@ -157,7 +158,8 @@ def get_token_throughput_latencies(
         with completed_requests_lock:
             if num_completed_requests < max_num_completed_requests:
                 if num_output_tokens:
-                    request_metrics[common_metrics.INTER_TOKEN_LAT] /= num_output_tokens
+                    # request_metrics[common_metrics.INTER_TOKEN_LAT] = num_output_tokens
+                    pass
                 else:
                     request_metrics[common_metrics.INTER_TOKEN_LAT] = 0
                 request_metrics[common_metrics.NUM_OUTPUT_TOKENS] = num_output_tokens
@@ -500,7 +502,7 @@ if __name__ == "__main__":
         for item in args.metadata.split(","):
             key, value = item.split("=")
             user_metadata[key] = value
-
+    
     run_token_benchmark(
         llm_api=args.llm_api,
         model=args.model,

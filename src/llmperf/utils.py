@@ -60,7 +60,7 @@ def randomly_sample_sonnet_lines_prompt(
     prompt_tokens_mean: int = 550,
     prompt_tokens_stddev: int = 250,
     expect_output_tokens: int = 150,
-    tokenizer = LlamaTokenizerFast.from_pretrained(
+    tokenizer=LlamaTokenizerFast.from_pretrained(
         "hf-internal-testing/llama-tokenizer")
 ) -> Tuple[str, int]:
     """Generate a prompt that randomly samples lines from a the shakespeare sonnet at sonnet.txt.
@@ -148,7 +148,7 @@ def flatten_dict(d, parent_key="", sep="_"):
 def randomly_sample_prompts(
     prompt_dict: str,
     max_seq_len: int = 2048,
-    tokenizer = LlamaTokenizerFast.from_pretrained("hf-internal-testing/llama-tokenizer")):
+    tokenizer=LlamaTokenizerFast.from_pretrained("hf-internal-testing/llama-tokenizer")):
     """Sample random questions with context and system length from the prompt dictionary passed to the function, and
     considering that the prompt doesn't exceed the max_seq_len
 
@@ -168,7 +168,7 @@ def randomly_sample_prompts(
         prompts = json.load(file)
 
     prompt_dict_size = len(prompts)
-    index = random.randint(0, prompt_dict_size)
+    index = random.randint(0, prompt_dict_size-1)
     num_prompt_tokens = get_token_length(prompts[index]["context"]) + get_token_length(prompts[index]["question"]) + get_token_length(prompts[index]["system_message"])
     prompt = prompts[index]
     
