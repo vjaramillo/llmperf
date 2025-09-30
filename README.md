@@ -410,7 +410,7 @@ class CustomLLMClient(LLMClient):
         ...
 
 ```
-test
+test2
 
 # Legacy Codebase
 The old LLMPerf code base can be found in the [llmperf-legacy](https://github.com/ray-project/llmval-legacy) repo.
